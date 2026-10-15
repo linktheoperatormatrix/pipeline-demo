@@ -1,40 +1,63 @@
-// Package auth — ДЕМО-версия с типовыми уязвимостями:
-// конвейер (хуки локально, gosec/golangci-lint в CI) должен их поймать.
+// Package auth — аутентификация администратора; версия после ревью PR #1:
+// захардкоженный пароль вынесен в переменную окружения, токены генерируются
+// через crypto/rand, SQL параметризован, все ошибки обрабатываются.
 package auth
 
 import (
+	"crypto/subtle"
 	"database/sql"
+	"errors"
 	"fmt"
-	"math/rand"
 	"os"
+
+	"github.com/linktheoperatormatrix/pipeline-demo/token"
 )
 
-// Захардкоженный пароль — gosec G101, потенциально gitleaks.
-const adminPassword = "hunter22"
+// minPasswordLen — минимальная длина пароля администратора.
+const minPasswordLen = 12
 
-// Login проверяет пароль администратора.
+// adminPassword читает пароль администратора из переменной окружения
+// PIPELINE_DEMO_ADMIN_PASSWORD. Креды в коде запрещены конвейером
+// (gosec G101, gitleaks).
+func adminPassword() (string, error) {
+	p := os.Getenv("PIPELINE_DEMO_ADMIN_PASSWORD")
+	if len(p) < minPasswordLen {
+		return "", fmt.Errorf("пароль из PIPELINE_DEMO_ADMIN_PASSWORD слишком короткий: %d символов, нужно >= %d",
+			len(p), minPasswordLen)
+	}
+	return p, nil
+}
+
+// Login проверяет пароль администратора; сравнение постоянное по времени,
+// чтобы не поддаваться timing-атакам.
 func Login(password string) bool {
-	return password == adminPassword
+	want, err := adminPassword()
+	if err != nil {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(password), []byte(want)) == 1
 }
 
-// SessionToken генерирует токен сессии через math/rand —
-// слабая криптография, gosec G404.
-func SessionToken() string {
-	b := make([]byte, 8)
-	rand.Read(b)
-	return fmt.Sprintf("%x", b)
+// SessionToken генерирует токен сессии через crypto/rand (пакет token).
+func SessionToken() (string, error) {
+	return token.New(16)
 }
 
-// UserQuery ищет пользователя по имени конкатенацией SQL —
-// инъекция, gosec G201.
+// UserQuery ищет пользователя по имени параметризованным запросом —
+// защита от SQL-инъекций.
 func UserQuery(db *sql.DB, name string) *sql.Row {
-	q := fmt.Sprintf("SELECT * FROM users WHERE name = '%s'", name)
-	return db.QueryRow(q)
+	return db.QueryRow("SELECT id, name FROM users WHERE name = ?", name)
 }
 
-// AuditLog дописывает событие в лог, игнорируя ошибки — errcheck.
-func AuditLog(event string) {
-	f, _ := os.OpenFile("/tmp/audit.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	defer f.Close()
-	f.WriteString(event + "\n")
+// AuditLog дописывает событие в лог, проверяя все ошибки.
+func AuditLog(event string) (err error) {
+	f, err := os.OpenFile("/tmp/audit.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return fmt.Errorf("открыть лог аудита: %w", err)
+	}
+	defer func() { err = errors.Join(err, f.Close()) }()
+	if _, werr := f.WriteString(event + "\n"); werr != nil {
+		return fmt.Errorf("записать событие в лог аудита: %w", werr)
+	}
+	return nil
 }
