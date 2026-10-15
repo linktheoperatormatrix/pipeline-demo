@@ -2,7 +2,8 @@
 
 Мини-проект на Go, показывающий полный конвейер доставки кода:
 локальные хуки → CI → агент-ревьюер. Та же схема масштабируется на любой
-реальный проект.
+реальный проект. Конвейер работает на GitHub Actions (`.github/workflows/`)
+и на GitLab CI (`.gitlab-ci.yml`) — один и тот же набор проверок.
 
 ## Слои проверок
 
@@ -25,16 +26,17 @@
 Теперь `git push` не пройдёт, пока не зелёные vet, lint и тесты.
 Обход в экстренном случае: `git push --no-verify` — но CI всё равно всё поймает.
 
-## Ревью-агент на MR
+## Ревью-агент на PR/MR
 
-Джоба `review-agent` берёт diff MR, отправляет в OpenAI-совместимый API и
-постит разбор. Переменные (Settings → CI/CD → Variables, все masked):
+Джоба `review-agent` берёт diff, отправляет в OpenAI-совместимый API и
+постит разбор. На GitHub (Settings → Secrets and variables → Actions):
 
-- `LLM_API_KEY` — ключ API (без неё агент спит);
-- `LLM_BASE_URL` — например `https://api.openai.com/v1`;
-- `LLM_MODEL` — например `gpt-4o-mini`;
-- `MR_COMMENT_TOKEN` — project access token (scope `api`), чтобы постить
-  комментарий в MR; без него ревью печатается в лог джобы.
+- секрет `LLM_API_KEY` — ключ API (без неё агент спит);
+- Variable `LLM_BASE_URL` — например `https://api.openai.com/v1`;
+- Variable `LLM_MODEL` — например `gpt-4o-mini`.
+
+На GitLab — те же переменные через Settings → CI/CD → Variables, плюс
+`MR_COMMENT_TOKEN` (project access token, scope `api`) для комментария в MR.
 
 ## Что демонстрирует «плохая» ветка
 
