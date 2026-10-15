@@ -1,0 +1,79 @@
+# Конвейер: линтер → тесты → безопасность → ревью-агент (на pull request).
+# Те же проверки в укороченном виде живут в lefthook.yml — локально перед push.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.14.0
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+      - run: go test -race -count=1 ./...
+
+  # Статический анализ безопасности: инъекции, слабая криптография,
+  # захардкоженные креды, небезопасные функции.
+  gosec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+      - name: gosec
+        uses: securego/gosec@master
+        with:
+          args: ./...
+
+  # Поиск утёкших секретов по всей истории git.
+  gitleaks:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Агент-ревьюер: берёт diff PR, отправляет в LLM, постит разбор.
+  # Спит, пока не задан секрет LLM_API_KEY (Settings → Secrets → Actions).
+  review-agent:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Запустить LLM-ревью
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL || 'https://api.openai.com/v1' }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || 'gpt-4o-mini' }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: sh scripts/review_agent.sh

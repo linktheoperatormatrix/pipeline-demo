@@ -1,3 +1,3 @@
-module gitlab.com/linktheoperatormatrix/pipeline-demo
+module github.com/linktheoperatormatrix/pipeline-demo
 
 go 1.27
