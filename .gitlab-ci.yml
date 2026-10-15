@@ -1,0 +1,57 @@
+# Конвейер: линтер → тесты → безопасность → ревью-агент (на merge request).
+# Те же проверки в укороченном виде живут в lefthook.yml — локально перед push.
+
+stages: [lint, test, security, review]
+
+workflow:
+  rules:
+    # пайплайн для MR и для веток; для ветки с открытым MR — не дублируем
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+
+lint:
+  stage: lint
+  image: golangci/golangci-lint:latest
+  script:
+    - golangci-lint run ./...
+
+test:
+  stage: test
+  image: golang:1.27
+  script:
+    - go test -race -count=1 ./...
+
+# Статический анализ безопасности: инъекции, слабая криптография,
+# захардкоженные креды, небезопасные функции.
+gosec:
+  stage: security
+  image:
+    name: securego/gosec:latest
+    entrypoint: [""]
+  script:
+    - gosec ./...
+
+# Поиск утёкших секретов по всей истории git.
+gitleaks:
+  stage: security
+  image:
+    name: zricethezav/gitleaks:latest
+    entrypoint: [""]
+  script:
+    - gitleaks git . --redact --verbose
+
+# Агент-ревьюер: берёт diff MR, отправляет в LLM, постит разбор.
+# Ручной запуск на MR; включается переменной LLM_API_KEY.
+review-agent:
+  stage: review
+  image: alpine:3.21
+  before_script:
+    - apk add --no-cache curl jq git
+  script:
+    - sh scripts/review_agent.sh
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+      allow_failure: true

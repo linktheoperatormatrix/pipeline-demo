@@ -1,0 +1,11 @@
+# Локальные проверки перед push: секунды, без Docker.
+# Установка: brew install lefthook && lefthook install
+# Обход (на свой страх): git push --no-verify
+pre-push:
+  commands:
+    vet:
+      run: go vet ./...
+    lint:
+      run: golangci-lint run ./...
+    tests:
+      run: go test -race -count=1 ./...
